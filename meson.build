@@ -11,7 +11,7 @@ project(
 )
 pkgconfig = import('pkgconfig')
 cc = meson.get_compiler('c')
-
+dep_libxml = dependency('libxml-2.0')
 
 # Compiler flags.
 foreach cflag: [
@@ -39,7 +39,6 @@ foreach cflag: [
     endif
 endforeach
 
-
 # The XKB config root.
 XKBCONFIGROOT = get_option('xkb-config-root')
 if XKBCONFIGROOT == ''
@@ -63,9 +62,15 @@ endif
 configh_data.set(system_extensions, 1)
 system_ext_define = '#define ' + system_extensions
 configh_data.set_quoted('DFLT_XKB_CONFIG_ROOT', XKBCONFIGROOT)
+if cc.has_header_symbol('unistd.h', 'eaccess', prefix: system_ext_define)
+    configh_data.set('HAVE_EACCESS', 1)
+endif
+if cc.has_header_symbol('unistd.h', 'euidaccess', prefix: system_ext_define)
+    configh_data.set('HAVE_EUIDACCESS', 1)
+endif
+
 configure_file(output: 'config.h', configuration: configh_data)
 add_project_arguments('-include', 'config.h', language: 'c')
-
 
 # Supports -Wl,--version-script?
 have_version_script = cc.links(
@@ -76,21 +81,29 @@ have_version_script = cc.links(
 
 
 libxkbregistry_sources = [
-    'src/xkbregistry.h'
+    'src/xkbregistry.c',
+    'src/xkbregistry.h',
+    'src/xkbregistry-private.h',
+    'src/util-list.c',
+    'src/util-list.h',
 ]
 libxkbregistry_link_args = []
 if have_version_script
     libxkbregistry_link_args += '-Wl,--version-script=' + join_paths(meson.source_root(), 'src', 'xkbregistry.map')
 endif
+deps_libxkbregistry = [dep_libxml]
 libxkbregistry = library(
     'xkbregistry',
     libxkbregistry_sources,
     link_args: libxkbregistry_link_args,
+    dependencies: deps_libxkbregistry,
     link_depends: join_paths(meson.source_root(), 'src', 'xkbregistry.map'),
     version: '0.0.0',
     install: true,
     include_directories: include_directories('src'),
 )
+dep_libxkbregistry = declare_dependency(link_with: libxkbregistry,
+					dependencies: deps_libxkbregistry)
 install_headers(
     'src/xkbregistry.h',
     subdir: 'xkbregistry',
@@ -103,7 +116,37 @@ pkgconfig.generate(
     description: 'XKB registry API to list available RMLVO components',
 )
 
+# Tests
+test_env = environment()
+test_env.set('top_srcdir', meson.source_root())
+test_env.set('top_builddir', meson.build_root())
+test_env.set('MALLOC_PERTURB_', '15')
+test_env.set('MallocPreScribble', '1')
+test_env.set('MallocScribble', '1')
 
+libxkbregistry_test_internal = static_library(
+    'xkbregistry-test-internal',
+    'test/test.h',
+    libxkbregistry_sources,
+    include_directories: include_directories('src'),
+    dependencies: deps_libxkbregistry,
+)
+test_dep = declare_dependency(
+    include_directories: include_directories('src'),
+    link_with: libxkbregistry_test_internal,
+)
+test(
+    'test-registry',
+    executable('test-registry', 'test/test-registry.c', dependencies: test_dep),
+    env: test_env,
+)
+
+
+executable('xkbregistry-list-all',
+	    'examples/list-all.c',
+	    dependencies: [dep_libxkbregistry],
+	    include_directories: include_directories('src'),
+	    install: false)
 # Documentation.
 if get_option('enable-docs')
     doxygen = find_program('doxygen', required: false)

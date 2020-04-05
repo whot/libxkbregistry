@@ -105,7 +105,22 @@ enum rxkb_context_flags {
  * @return A new xkb registry context or NULL on failure
  */
 struct rxkb_context *
-rxkb_context_new(enum  rxkb_context_flags flags);
+rxkb_context_new(enum rxkb_context_flags flags);
+
+/**
+ * Parse the given ruleset. This can only be called once per context, once
+ * parsed the data in the context is considered constant and will never
+ * change.
+ */
+bool
+rxkb_context_parse(struct rxkb_context *ctx, const char *ruleset);
+
+/**
+ * Parse the default ruleset as configured at build time. See
+ * rxkb_context_parse() for details.
+ */
+bool
+rxkb_context_parse_default_ruleset(struct rxkb_context *ctx);
 
 /**
  * Increases the refcount of this object by one and returns the object.
@@ -256,6 +271,12 @@ rxkb_option_group_ref(struct rxkb_option_group *g);
 
 struct rxkb_option_group *
 rxkb_option_group_unref(struct rxkb_option_group *g);
+
+const char *
+rxkb_option_group_get_name(struct rxkb_option_group *m);
+
+const char *
+rxkb_option_group_get_description(struct rxkb_option_group *m);
 
 /**
  * @return true if multiple options within this option group can be selected

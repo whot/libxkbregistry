@@ -22,11 +22,13 @@
  */
 
 #include "config.h"
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <libxml/parser.h>
+#include <libxml/xinclude.h>
 
 #include "xkbregistry-private.h"
 
@@ -555,15 +557,91 @@ parse_rules_xml(struct rxkb_context *ctx, xmlNode *root)
 	}
 }
 
+/* Allowed xi:include prefixes */
+const char *prefixes[] = {
+	"/",		/* we allow for direct file paths */
+	"file://",
+	"xkb://",	/* xkb system directory base */
+	"home://",
+	NULL,
+};
+
+static int
+cb_match(const char *uri)
+{
+	if (uri != NULL) {
+		const char **prefix = prefixes;
+		while (*prefix) {
+			if (strncmp(uri, *prefix, strlen(*prefix)) == 0)
+				return 1;
+			prefix++;
+		}
+	}
+	return 0;
+}
+
+static void *
+cb_open(const char *uri)
+{
+	char path[PATH_MAX];
+	int fd;
+
+	if (!cb_match(uri))
+		return NULL;
+
+	if (uri[0] == '/') {
+		snprintf(path, sizeof(path), "%s", uri);
+	} else if (strncmp(uri, "file://", 7) == 0) {
+		snprintf(path, sizeof(path), "%s", &uri[7]);
+	} else if (strncmp(uri, "xkb://", 6) == 0) {
+		snprintf(path, sizeof(path), "%s/%s",
+			 DFLT_XKB_CONFIG_ROOT,
+			 &uri[6]);
+	} else if (strncmp(uri, "home://", 7) == 0) {
+		const char *home = secure_getenv("HOME");
+
+		if (!home)
+			return NULL;
+
+		snprintf(path, sizeof(path), "%s/%s", home, &uri[6]);
+	} else {
+		return NULL;
+	}
+
+	fd = open(path, O_RDONLY);
+	if (fd == -1)
+		return NULL;
+	return (void*) (long)fd;
+}
+
+static int
+cb_read(void *context, char *buffer, int len)
+{
+	int fd = (int) (long)context;
+
+	return read(fd, buffer, len);
+}
+
+static int
+cb_close(void *context)
+{
+	close((int) (long)context);
+	return 0;
+}
+
 static bool
 parse(struct rxkb_context *ctx, const char *path)
 {
 	xmlDoc *doc = NULL;
 	xmlNode *root = NULL;
 
+	xmlRegisterInputCallbacks(cb_match, cb_open, cb_read, cb_close);
+
 	doc = xmlReadFile(path, NULL, 0);
 	if (!doc)
 		return false;
+
+	xmlXIncludeProcess(doc);
 
 	root = xmlDocGetRootElement(doc);
 	parse_rules_xml(ctx, root);
